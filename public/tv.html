@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>SubWars TV</title>
+  <style>
+    body { margin:0; font-family: sans-serif; background:#001F3F; color:#fff; display:flex; flex-direction:column; align-items:center; }
+    #info { margin: 10px; font-size: 24px; }
+    canvas { background:#002B5B; border:1px solid #004080; }
+  </style>
+</head>
+<body>
+  <div id="info">Room: <span id="roomId"></span></div>
+  <canvas id="gameCanvas" width="800" height="600"></canvas>
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const roomSpan = document.getElementById('roomId');
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // Create a room when the TV page loads
+    socket.emit('createRoom');
+
+    socket.on('roomCreated', (id) => {
+      roomSpan.textContent = id;
+    });
+
+    let state = { players: {} };
+    socket.on('state', (newState) => {
+      state = newState;
+      draw();
+    });
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // Draw each sub as a small triangle
+      Object.values(state.players).forEach((p) => {
+        drawSub(p.x, p.y, p.angle);
+      });
+    }
+
+    function drawSub(x, y, angle) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(angle);
+      ctx.fillStyle = 'cyan';
+      ctx.beginPath();
+      ctx.moveTo(12, 0);
+      ctx.lineTo(-8, 6);
+      ctx.lineTo(-8, -6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  </script>
+</body>
+</html>
