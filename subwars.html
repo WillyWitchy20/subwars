@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>SubWars Single-file</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<style>
+body { margin:0; font-family:sans-serif; background:#111; color:#eee; overflow:hidden; }
+.section { display:none; padding:20px; }
+#roleSelection { display:block; }
+button { padding:10px 20px; margin:5px; font-size:16px; }
+textarea { width:100%; height:80px; }
+canvas { background:#000; width:100%; height:100%; touch-action:none; display:block; }
+</style>
+</head>
+<body>
+<div id="roleSelection" class="section">
+  <h1>SubWars</h1>
+  <button id="tvBtn">I'm the TV</button>
+  <button id="phoneBtn">I'm a Phone</button>
+</div>
+<div id="tvSection" class="section">
+  <h2>TV Host</h2>
+  <button id="createOfferBtn">Create Offer</button>
+  <textarea id="offerOut" placeholder="Offer will appear here"></textarea>
+  <textarea id="answerIn" placeholder="Paste Answer here"></textarea>
+  <button id="acceptAnswerBtn">Accept Answer</button>
+  <button id="startGameBtn">Start Game</button>
+  <canvas id="tvCanvas" width="800" height="600"></canvas>
+</div>
+<div id="phoneSection" class="section">
+  <h2>Phone</h2>
+  <textarea id="offerIn" placeholder="Paste Offer here"></textarea>
+  <button id="genAnswerBtn">Generate Answer</button>
+  <textarea id="answerOut" placeholder="Answer will appear here"></textarea>
+  <button id="joinGameBtn">Join Game</button>
+  <div id="controls" style="display:none;">
+    <canvas id="phoneCanvas" width="600" height="600"></canvas>
+    <div>
+      <button id="fireBtn">Fire</button>
+      <button id="pingBtn">Ping</button>
+    </div>
+  </div>
+</div>
+<script>
+const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+let peerConnection;
+let dataChannel;
+let players = {};
+let localId;
+let gameStarted = false;
+let isHost = false;
+// show/hide sections
+function show(section) {
+  document.querySelectorAll('.section').forEach(sec => sec.style.display = 'none');
+  document.getElementById(section).style.display = 'block';
+}
+document.getElementById('tvBtn').onclick = () => { isHost = true; show('tvSection'); };
+document.getElementById('phoneBtn').onclick = () => { isHost = false; show('phoneSection'); };
+// Host: create offer
+ document.getElementById('createOfferBtn').onclick = async () => {
+  peerConnection = new RTCPeerConnection(configuration);
+  dataChannel = peerConnection.createDataChannel('subwars');
+  setupHostDataChannel(dataChannel);
+  peerConnection.onicecandidate = e => {
+    if(e.candidate === null) {
+      document.getElementById('offerOut').value = btoa(JSON.stringify(peerConnection.localDescription));
+    }
+  };
+  const offer = await peerConnection.createOffer();
+  await peerConnection.setLocalDescription(offer);
+};
+// Host: accept answer
+ document.getElementById('acceptAnswerBtn').onclick = async () => {
+  const answerStr = document.getElementById('answerIn').value.trim();
+  if(!answerStr) return;
+  const answer = new RTCSessionDescription(JSON.parse(atob(answerStr)));
+  await peerConnection.setRemoteDescription(answer);
+  alert('Answer accepted. Players may join.');
+};
+// Host: start game
+ document.getElementById('startGameBtn').onclick = () => {
+  if(!gameStarted) {
+    startHostGame();
+    gameStarted = true;
+  }
+};
+// Phone: generate answer
+ document.getElementById('genAnswerBtn').onclick = async () => {
+  peerConnection = new RTCPeerConnection(configuration);
+  peerConnection.ondatachannel = e => {
+    dataChannel = e.channel;
+    setupPhoneDataChannel(dataChannel);
+  };
+  peerConnection.onicecandidate = e => {
+    if(e.candidate === null) {
+      document.getElementById('answerOut').value = btoa(JSON.stringify(peerConnection.localDescription));
+    }
+  };
+  const offerStr = document.getElementById('offerIn').value.trim();
+  if(!offerStr) return;
+  const offer = new RTCSessionDescription(JSON.parse(atob(offerStr)));
+  await peerConnection.setRemoteDescription(offer);
+  const answer = await peerConnection.createAnswer();
+  await peerConnection.setLocalDescription(answer);
+};
+// Phone: join game
+ document.getElementById('joinGameBtn').onclick = () => {
+  document.getElementById('controls').style.display = 'block';
+};
+// Host data channel setup
+function setupHostDataChannel(channel) {
+  channel.onopen = () => {
+    console.log('Host data channel open');
+  };
+  channel.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    if(msg.type === 'input') {
+      if(!players[msg.id]) {
+        players[msg.id] = { x: Math.random()*800, y: Math.random()*600, angle:0, turn:0, throttle:0 };
+      }
+      players[msg.id].turn = msg.turn;
+      players[msg.id].throttle = msg.throttle;
+    }
+  };
+}
+// Phone data channel setup
+function setupPhoneDataChannel(channel) {
+  channel.onopen = () => {
+    console.log('Phone data channel open');
+    localId = Math.floor(Math.random()*1000000).toString();
+    startPhoneGame();
+  };
+  channel.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    if(msg.type === 'state') {
+      remoteState = msg.players;
+    }
+  };
+}
+// Host game loop
+function startHostGame() {
+  setInterval(() => {
+    for(const id in players) {
+      const p = players[id];
+      p.angle += p.turn * 0.1;
+      const speed = p.throttle * 2;
+      p.x = (p.x + Math.cos(p.angle)*speed + 800) % 800;
+      p.y = (p.y + Math.sin(p.angle)*speed + 600) % 600;
+    }
+    // broadcast state
+    const state = { type:'state', players };
+    if(dataChannel && dataChannel.readyState === 'open') {
+      dataChannel.send(JSON.stringify(state));
+    }
+    drawHost();
+  }, 50);
+}
+// Draw host
+function drawHost() {
+  const canvas = document.getElementById('tvCanvas');
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#001f3f';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  for(const id in players) {
+    const p = players[id];
+    ctx.save();
+    ctx.translate(p.x,p.y);
+    ctx.rotate(p.angle);
+    ctx.fillStyle = '#39CCCC';
+    ctx.beginPath();
+    ctx.moveTo(10,0);
+    ctx.lineTo(-8,5);
+    ctx.lineTo(-8,-5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+}
+// Phone variables
+let remoteState = {};
+let turn=0, throttle=0;
+// Phone game loop
+function startPhoneGame() {
+  const canvas = document.getElementById('phoneCanvas');
+  const ctx = canvas.getContext('2d');
+  canvas.addEventListener('pointerdown', e => {
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', e => {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    turn = ((x / rect.width) - 0.5) * 2;
+    throttle = 1 - (y / rect.height);
+    throttle = Math.max(0, Math.min(1, throttle));
+  });
+  canvas.addEventListener('pointerup', e => {
+    turn = 0;
+    throttle = 0;
+  });
+  setInterval(() => {
+    if(dataChannel && dataChannel.readyState === 'open') {
+      const msg = { type:'input', id: localId, turn, throttle };
+      dataChannel.send(JSON.stringify(msg));
+    }
+    drawPhone(ctx);
+  }, 50);
+}
+// Draw phone HUD
+function drawPhone(ctx) {
+  ctx.fillStyle = '#001f3f';
+  ctx.fillRect(0,0,ctx.canvas.width, ctx.canvas.height);
+  // draw orientation/acceleration cross
+  ctx.strokeStyle = '#39CCCC';
+  ctx.beginPath();
+  ctx.moveTo(ctx.canvas.width/2, ctx.canvas.height/2);
+  const len = 60;
+  ctx.lineTo(ctx.canvas.width/2 + turn * len, ctx.canvas.height/2 - throttle * len);
+  ctx.stroke();
+}
+</script>
+</body>
+</html>
