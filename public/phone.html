@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <style>
+    body { margin:0; font-family:sans-serif; background:#111; color:white; overflow:hidden; }
+    #join { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; }
+    #game { display:none; height:100vh; position:relative; }
+    .joystick { position:absolute; bottom:20%; left:10%; width:40%; height:40%; border-radius:50%; border:2px solid #555; }
+    .handle { position:absolute; width:30%; height:30%; border-radius:50%; background:#444; left:35%; top:35%; touch-action:none; }
+    .slider { position:absolute; bottom:20%; right:10%; width:15%; height:40%; background:#222; border:2px solid #555; }
+    .thumb { position:absolute; width:100%; height:20%; background:#444; bottom:0; }
+    .buttons { position:absolute; bottom:5%; width:100%; display:flex; justify-content:center; gap:20px; }
+    button { padding:15px 20px; font-size:20px; background:#2a2; border:none; border-radius:8px; color:white; }
+    #ping { background:#227; }
+  </style>
+</head>
+<body>
+<div id="join">
+  <h1>Join Room</h1>
+  <input id="roomInput" placeholder="Room Code" style="font-size:24px;text-transform:uppercase;" maxlength="4">
+  <button id="joinBtn">Join</button>
+</div>
+<div id="game">
+  <div class="joystick" id="joystick">
+    <div class="handle" id="handle"></div>
+  </div>
+  <div class="slider" id="slider">
+    <div class="thumb" id="thumb"></div>
+  </div>
+  <div class="buttons">
+    <button id="fire">Fire</button>
+    <button id="ping">Ping</button>
+  </div>
+</div>
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const socket = io();
+  let roomId;
+  let throttle=0, turn=0;
+  let canPing=true, canFire=true;
+  document.getElementById('joinBtn').onclick = ()=> {
+    roomId = document.getElementById('roomInput').value.toUpperCase();
+    if(!roomId) return;
+    socket.emit('joinRoom', { roomId });
+    document.getElementById('join').style.display='none';
+    document.getElementById('game').style.display='block';
+  };
+  // joystick
+  const joystick = document.getElementById('joystick');
+  const handle = document.getElementById('handle');
+  let joyActive = false;
+  function setTurn(x) {
+    // x between -1 and 1 controls turn
+    turn = Math.max(-1, Math.min(1, x));
+  }
+  function updateHandle(x, y) {
+    const hx = Math.max(-1, Math.min(1, x));
+    const hy = Math.max(-1, Math.min(1, y));
+    handle.style.left = ((hx+1)*0.5*joystick.clientWidth - handle.clientWidth/2)+'px';
+    handle.style.top = ((hy+1)*0.5*joystick.clientHeight - handle.clientHeight/2)+'px';
+  }
+  function resetHandle() {
+    handle.style.left = '35%';
+    handle.style.top = '35%';
+    turn = 0;
+  }
+  joystick.addEventListener('pointerdown', e=> {
+    joyActive=true;
+    joystick.setPointerCapture(e.pointerId);
+    const rect=joystick.getBoundingClientRect();
+    let x=(e.clientX-rect.left)/rect.width*2 -1;
+    let y=(e.clientY-rect.top)/rect.height*2 -1;
+    setTurn(x);
+    updateHandle(x,y);
+  });
+  joystick.addEventListener('pointermove', e=> {
+    if(!joyActive) return;
+    const rect=joystick.getBoundingClientRect();
+    let x=(e.clientX-rect.left)/rect.width*2 -1;
+    let y=(e.clientY-rect.top)/rect.height*2 -1;
+    setTurn(x);
+    updateHandle(x,y);
+  });
+  joystick.addEventListener('pointerup', e=> {
+    joyActive=false;
+    resetHandle();
+  });
+  joystick.addEventListener('pointercancel', e=> { joyActive=false; resetHandle(); });
+
+  // slider
+  const slider = document.getElementById('slider');
+  const thumb = document.getElementById('thumb');
+  let sliderActive=false;
+  function setThrottleFromPos(clientY) {
+    const rect=slider.getBoundingClientRect();
+    let y = (clientY-rect.top)/rect.height;
+    y = Math.max(0, Math.min(1,y));
+    throttle = 1 - y;
+    thumb.style.bottom = (y*100)+'%';
+  }
+  slider.addEventListener('pointerdown', e=> {
+    sliderActive=true;
+    slider.setPointerCapture(e.pointerId);
+    setThrottleFromPos(e.clientY);
+  });
+  slider.addEventListener('pointermove', e=> {
+    if(!sliderActive) return;
+    setThrottleFromPos(e.clientY);
+  });
+  slider.addEventListener('pointerup', e=> {
+    sliderActive=false;
+  });
+  slider.addEventListener('pointercancel', e=> { sliderActive=false; });
+
+  // buttons
+  document.getElementById('fire').onclick = ()=> {
+    if (canFire && roomId) {
+      socket.emit('input', { roomId, fire: true });
+      canFire = false;
+      setTimeout(()=> canFire = true, 1000);
+    }
+  };
+  document.getElementById('ping').onclick = ()=> {
+    if (canPing && roomId) {
+      socket.emit('input', { roomId, ping: true });
+      canPing = false;
+      setTimeout(()=> canPing = true, 3000);
+    }
+  };
+  // send inputs periodically
+  setInterval(()=> {
+    if(!roomId) return;
+    socket.emit('input', { roomId, throttle, turn });
+  }, 50);
+</script>
+</body>
+</html>
